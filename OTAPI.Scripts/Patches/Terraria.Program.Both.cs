@@ -47,11 +47,6 @@ namespace Terraria
         /// </summary>
         public static event EventHandler OnLaunched;
 
-        /// <summary>
-        /// Allows a host application to determine if ModFramework is invoked.
-        /// </summary>
-        public static bool EnableModFramework { get; set; } = true;
-
         static string CSV(params string[] args) => String.Join(",", args.Where(x => !String.IsNullOrWhiteSpace(x)));
 
         /// <summary>
@@ -65,11 +60,9 @@ namespace Terraria
 
             Console.WriteLine($"[OTAPI] Starting up ({CSV(OTAPI.Common.Target, OTAPI.Common.Version, OTAPI.Common.GitHubCommit)}).");
 
-            if (EnableModFramework)
-            {
-                PluginLoader.TryLoad();
-                Modifier.Apply(ModType.Runtime);
-            }
+            // load modfw plugins
+            PluginLoader.TryLoad();
+            Modifier.Apply(ModType.Runtime, optionalParams: new[] { Assembly.GetExecutingAssembly() }); // set Assembly type to Terraria/OTAPI for runtime plugins to resolve easier when they dont have a direct ref
 
 #if Terraria // client
             Main.versionNumber += " OTAPI";
@@ -102,21 +95,14 @@ namespace Terraria
             return null;
         }
 
-#if Terraria // client
-        public static extern void orig_LaunchGame(string[] args, bool monoArgs = false);
-        public static void LaunchGame(string[] args, bool monoArgs = false)
-        {
-            LaunchOTAPI();
-            orig_LaunchGame(args, monoArgs);
-        }
-#elif tModLoaderServer // tml
+#if tModLoaderServer
         public static extern void orig_LaunchGame_();
         public static void LaunchGame_()
         {
             LaunchOTAPI();
             orig_LaunchGame_();
         }
-#else // server
+#else // server + client
         public static extern void orig_LaunchGame(string[] args, bool monoArgs = false);
         public static void LaunchGame(string[] args, bool monoArgs = false)
         {
