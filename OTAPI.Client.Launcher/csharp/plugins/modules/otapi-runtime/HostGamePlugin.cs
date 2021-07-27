@@ -29,9 +29,29 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
+
+using MonoMod.RuntimeDetour;
 
 class HostGamePlugin
 {
+    static Hook LazyHook<TType>(string method, Delegate callback, Type[] types = null)
+    {
+        var func = typeof(TType).GetMethod(method, types);
+        if (func != null) return new Hook(func, callback);
+        return null;
+    }
+
+    static DialogResult MessageBox_Show(string text, string caption)
+    {
+        Console.WriteLine($"[MSG {caption}] {text}");
+        OTAPI.Client.Launcher.MessageBox.Show(text, caption);
+        return DialogResult.Ignore;
+    }
+
+    static DialogResult MessageBox_Show(string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon)
+        => MessageBox_Show(text, caption);
+
     [ModFramework.Modification(ModFramework.ModType.Runtime, "Patching windows code to run FNA")]
     static void PatchClient()
     {
@@ -41,6 +61,18 @@ class HostGamePlugin
         {
             return new HostGame();
         };
+
+        // .net5 needs UseShellExecute
+        On.Terraria.Utils.OpenFolder += (orig, folder) =>
+        {
+            using var process = new Process();
+            process.StartInfo.UseShellExecute = true;
+            process.StartInfo.FileName = folder;
+            process.Start();
+        };
+
+        LazyHook<MessageBox>("Show", new Func<string, string, DialogResult>(MessageBox_Show), new[] { typeof(string), typeof(string) });
+        LazyHook<MessageBox>("Show", new Func<string, string, MessageBoxButtons, MessageBoxIcon, DialogResult>(MessageBox_Show), new[] { typeof(string), typeof(string), typeof(MessageBoxButtons), typeof(MessageBoxIcon) });
 
 #if Platform_WINDOWS
         Console.WriteLine("Applying windows hooks");

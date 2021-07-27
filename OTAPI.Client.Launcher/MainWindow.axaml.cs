@@ -116,12 +116,7 @@ namespace OTAPI.Client.Launcher
             {
                 if (Context.InstallPathValid)
                 {
-                    // Terraria.icns
-
                     var is_bundle = Path.GetFileName(Environment.CurrentDirectory).Equals("MacOS", StringComparison.CurrentCultureIgnoreCase);
-                    Console.WriteLine($"is_bundle: {is_bundle}");
-                    Console.WriteLine($"GetDirectoryName: {Path.GetFileName(Environment.CurrentDirectory)}");
-                    Console.WriteLine($"Environment.CurrentDirectory: {Environment.CurrentDirectory}");
                     if (is_bundle)
                     {
                         var icon_src = Path.Combine(Context.InstallPath.Path, "Resources", "Terraria.icns");
@@ -130,9 +125,7 @@ namespace OTAPI.Client.Launcher
                         if (File.Exists(icon_dst)) File.Delete(icon_dst);
 
                         if (File.Exists(icon_src) && !File.Exists(icon_dst))
-                        {
                             File.Copy(icon_src, icon_dst);
-                        }
                     }
                 }
             }
@@ -168,6 +161,19 @@ namespace OTAPI.Client.Launcher
             }
 
             Context.InstallStatus = "Install path is not supported";
+        }
+
+        public void OnOpenWorkspace(object sender, RoutedEventArgs e) => OpenFolder(Environment.CurrentDirectory);
+        public void OnOpenCSharp(object sender, RoutedEventArgs e) => OpenFolder(Path.Combine(Environment.CurrentDirectory, "csharp", "plugins", "modules"));
+        public void OnOpenJavascript(object sender, RoutedEventArgs e) => OpenFolder(Path.Combine(Environment.CurrentDirectory, "clearscript"));
+        public void OnOpenLua(object sender, RoutedEventArgs e) => OpenFolder(Path.Combine(Environment.CurrentDirectory, "lua"));
+
+        public void OpenFolder(string folder)
+        {
+            using var process = new System.Diagnostics.Process();
+            process.StartInfo.UseShellExecute = true;
+            process.StartInfo.FileName = folder;
+            process.Start();
         }
 
         public void OnInstall(object sender, RoutedEventArgs e)
