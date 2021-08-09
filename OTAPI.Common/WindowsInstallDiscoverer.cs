@@ -23,8 +23,6 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace OTAPI.Common
 {
@@ -32,7 +30,7 @@ namespace OTAPI.Common
     {
         public override string[] SearchPaths { get; } = new[]
         {
-            "C:\\Program Files (x86)\\Steam\\steamapps\\common"
+            "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Terraria"
         };
 
         public override OSPlatform GetClientPlatform() => OSPlatform.Windows;
