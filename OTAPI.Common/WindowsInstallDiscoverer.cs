@@ -40,6 +40,9 @@ namespace OTAPI.Common
 
         public override bool IsValidInstallPath(string folder)
         {
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return false;
+
             bool valid = Directory.Exists(folder);
 
             var content = Path.Combine(folder, "Content");
@@ -98,6 +101,12 @@ namespace OTAPI.Common
             }
 
             return Enumerable.Empty<string>();
+        }
+
+        public override bool VerifyIntegrity(string path)
+        {
+            var hash = IntegrityHashes.ComputeHash(path);
+            return IntegrityHashes.WindowsClient.Any(h => h.Equals(hash, StringComparison.CurrentCultureIgnoreCase));
         }
     }
 }

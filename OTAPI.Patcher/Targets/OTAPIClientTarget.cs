@@ -22,6 +22,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 using ModFramework;
 using ModFramework.Modules.CSharp;
 using ModFramework.Plugins;
@@ -31,7 +32,6 @@ using OTAPI.Common;
 
 namespace OTAPI.Patcher.Targets
 {
-
     [MonoMod.MonoModIgnore]
     public class OTAPIClientLightweightTarget : IPatchTarget
     {
@@ -86,7 +86,7 @@ namespace OTAPI.Patcher.Targets
                 {
                     var abs = Path.GetFullPath(file);
                     var content = File.ReadAllBytes(abs);
-                    assembly = Assembly.Load(content);
+                    assembly = AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(content));
                 }
                 catch (Exception ex)
                 {
@@ -96,16 +96,29 @@ namespace OTAPI.Patcher.Targets
             return assembly != null;
         }
 
+        void SetStatus(string status)
+        {
+            StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = status });
+            Console.WriteLine(status);
+        }
+
+        void RemovePatcherFromCompilation(object instance, CSharpLoader.CompilationContextArgs args)
+        {
+            args.Context.Compilation = args.Context.Compilation.WithReferences(args.Context.Compilation.References.Where(r => r.Display.IndexOf("OTAPI.Patcher") == -1));
+        }
+
         public void Patch()
         {
             Console.WriteLine($"Open Terraria API v{Common.GetVersion()} [lightweight]");
 
-            StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Starting..." });
+            SetStatus("Starting...");
 
             PluginLoader.AssemblyFound += CanLoadPatchFile;
             CSharpLoader.AssemblyFound += CanLoadPatchFile;
             ModFramework.Modules.ClearScript.ScriptManager.FileFound += CanLoadPatchFile;
             ModFramework.Modules.Lua.ScriptManager.FileFound += CanLoadPatchFile;
+
+            CSharpLoader.OnCompilationContext += RemovePatcherFromCompilation;
             try
             {
                 this.AddMarkdownFormatter();
@@ -125,12 +138,26 @@ namespace OTAPI.Patcher.Targets
 
                 var input = File.Exists(input_orig) ? input_orig : input_regular;
 
+                var is_input_pristine = installDiscoverer.Target.VerifyIntegrity(input);
+                if (!is_input_pristine)
+                {
+                    var fg = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Error.WriteLine("Your vanilla install is not pristine and may likely cause patching issues.");
+                    Console.Error.WriteLine("Please verify integrity of your Terraria installation or reinstall it.");
+                    Console.Error.WriteLine("Support will not be given unless you are running a clean environment and can replicate the problem consistently.");
+                    Console.Error.WriteLine("Continuing in 5 seconds.");
+                    Console.ForegroundColor = fg;
+                    System.Threading.Thread.Sleep(1000 * 5);
+                }
+
                 //var freshAssembly = "../../../../OTAPI.Setup/bin/Debug/net5.0/Terraria.exe";
                 var localPath_x86 = "Terraria.x86.exe";
                 var localPath_x64 = "Terraria.x64.exe";
 
                 if (File.Exists(localPath_x86)) File.Delete(localPath_x86);
                 if (File.Exists(localPath_x64)) File.Delete(localPath_x64);
+                if (File.Exists("OTAPI.exe")) File.Delete("OTAPI.exe");
 
                 File.Copy(input, localPath_x86);
 
@@ -209,7 +236,7 @@ namespace OTAPI.Patcher.Targets
 
                 // hot patch terraria.exe straight up to x64 so we dont fail on Assembly.LoadFile next
 
-                StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Converting to x64" });
+                SetStatus("Converting to x64");
                 {
                     using var pa = AssemblyDefinition.ReadAssembly(primaryAssemblyPath);
                     pa.MainModule.Architecture = TargetArchitecture.I386;
@@ -256,11 +283,11 @@ namespace OTAPI.Patcher.Targets
                 //    File.Delete(fna_res);
                 //}
 
-                StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Loading plugins..." });
+                SetStatus("Loading plugins...");
 
                 // set the /patchtime path for client installs
                 PluginLoader.Clear();
-                CSharpLoader.GlobalRootDirectory = Path.Combine("patchtime", "csharp", "plugins");
+                CSharpLoader.GlobalRootDirectory = Path.Combine("patchtime", "csharp");
                 CSharpLoader.GlobalAssemblies.Clear();
 
                 // build shims
@@ -304,7 +331,7 @@ namespace OTAPI.Patcher.Targets
                     public_mm.RelinkAssembly("ReLogic");
                     public_mm.RelinkAssembly("RailSDK.Net");
 
-                    StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Merging and pregenerating files, this will be brief..." });
+                    SetStatus("Merging and pregenerating files, this will be brief...");
 
                     public_mm.AutoPatch();
                     public_mm.Write();
@@ -316,20 +343,23 @@ namespace OTAPI.Patcher.Targets
                     var inputName = Path.GetFileNameWithoutExtension(input_regular);
                     var initialModuleName = public_mm.Module.Name;
 
-                    var const_major = $"{inputName}_V{public_mm.Module.Assembly.Name.Version.Major}_{public_mm.Module.Assembly.Name.Version.Minor}";
-                    var const_fullname = $"{inputName}_{public_mm.Module.Assembly.Name.Version.ToString().Replace(".", "_")}";
+                    var version = public_mm.Module.Assembly.Name.Version;
+                    var const_major = $"{inputName}_V{version.Major}_{version.Minor}";
+                    var const_fullname = $"{inputName}_{version.ToString().Replace(".", "_")}";
                     var platform = "Platform_" + installDiscoverer.Target.GetClientPlatform().ToString();
+                    var const_senddatapatch = $"{inputName}_SendDataNumber{(version >= new Version("1.4.3.0") ? "8" : "7")}";
 
                     File.WriteAllText("AutoGenerated.target", @$"<!-- DO NOT EDIT THIS FILE! It was auto generated by the setup project  -->
 <Project xmlns=""http://schemas.microsoft.com/developer/msbuild/2003"">
   <PropertyGroup>
-    <DefineConstants>{inputName};{const_major};{const_fullname};{platform}</DefineConstants>
+    <DefineConstants>{inputName};{const_major};{const_fullname};{platform};{const_senddatapatch}</DefineConstants>
   </PropertyGroup>
 </Project>");
                     File.WriteAllText("AutoGenerated.cs", @$"#define {inputName}
 #define {const_major}
 #define {const_fullname}
 #define {platform}
+#define {const_senddatapatch}
 ");
                 }
 
@@ -347,7 +377,7 @@ namespace OTAPI.Patcher.Targets
 
                 var temp_out = Path.Combine("outputs", "OTAPI.exe");
 
-                StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Modifying installation, this will take a moment..." });
+                SetStatus("Modifying installation, this will take a moment...");
                 using (var mm = new ModFwModder()
                 {
                     InputPath = "OTAPI.dll",
@@ -410,10 +440,10 @@ namespace OTAPI.Patcher.Targets
 
                     CreateRuntimeEvents();
 
-                    StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Relinking to .NET5..." });
+                    SetStatus("Relinking to .NET5...");
                     CoreLibRelinker.PostProcessCoreLib(temp_out, "outputs/OTAPI.Runtime.dll");
 
-                    StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Writing MD..." });
+                    SetStatus("Writing MD...");
                     var doco_md = $"OTAPI.PC.Client.${installDiscoverer.Target.GetClientPlatform()}.mfw.md";
                     if (File.Exists(doco_md)) File.Delete(doco_md);
                     markdownDocumentor.Write(doco_md);
@@ -434,6 +464,7 @@ namespace OTAPI.Patcher.Targets
                 CSharpLoader.AssemblyFound -= CanLoadPatchFile;
                 ModFramework.Modules.ClearScript.ScriptManager.FileFound -= CanLoadPatchFile;
                 ModFramework.Modules.Lua.ScriptManager.FileFound -= CanLoadPatchFile;
+                CSharpLoader.OnCompilationContext -= RemovePatcherFromCompilation;
             }
 
             CompileModules();
@@ -442,40 +473,23 @@ namespace OTAPI.Patcher.Targets
 
         void CompileModules()
         {
-            StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Compiling modules..." });
+            SetStatus("Compiling modules...");
             Console.WriteLine("[OTAPI] Compiling modules.");
             PluginLoader.AssemblyFound += CanLoadCompilationFile;
             CSharpLoader.AssemblyFound += CanLoadCompilationFile;
             ModFramework.Modules.ClearScript.ScriptManager.FileFound += CanLoadCompilationFile;
             ModFramework.Modules.Lua.ScriptManager.FileFound += CanLoadCompilationFile;
+            CSharpLoader.OnCompilationContext += RemovePatcherFromCompilation;
             try
             {
                 PluginLoader.Clear();
-                CSharpLoader.GlobalRootDirectory = Path.Combine("patchtime", "csharp", "plugins");
+                CSharpLoader.GlobalRootDirectory = Path.Combine("patchtime", "csharp");
                 CSharpLoader.GlobalAssemblies.Clear();
                 CSharpLoader.GlobalAssemblies.Add("OTAPI.exe");
                 CSharpLoader.GlobalAssemblies.Add("OTAPI.Runtime.dll");
                 CSharpLoader.GlobalAssemblies.Add("FNA.dll");
                 PluginLoader.TryLoad();
                 Modifier.Apply(ModType.Write);
-
-                //// copy mods
-                //var mods_dll = Path.Combine("csharp", "generated", "CSharpScript_OTAPI.Mods.dll");
-                //var mods_pdb = Path.Combine("csharp", "generated", "CSharpScript_OTAPI.Mods.pdb");
-                //var mods_xml = Path.Combine("csharp", "generated", "CSharpScript_OTAPI.Mods.xml");
-
-                //var dst_dll = Path.Combine("modifications", "OTAPI.Mods.dll");
-                //var dst_pdb = Path.Combine("modifications", "OTAPI.Mods.pdb");
-                //var dst_xml = Path.Combine("modifications", "OTAPI.Mods.xml");
-
-                //if (File.Exists(dst_dll)) File.Delete(dst_dll);
-                //File.Copy(mods_dll, dst_dll);
-
-                //if (File.Exists(dst_pdb)) File.Delete(dst_pdb);
-                //File.Copy(mods_pdb, dst_pdb);
-
-                //if (File.Exists(dst_xml)) File.Delete(dst_xml);
-                //File.Copy(mods_xml, dst_xml);
             }
             finally
             {
@@ -483,13 +497,14 @@ namespace OTAPI.Patcher.Targets
                 CSharpLoader.AssemblyFound -= CanLoadCompilationFile;
                 ModFramework.Modules.ClearScript.ScriptManager.FileFound -= CanLoadCompilationFile;
                 ModFramework.Modules.Lua.ScriptManager.FileFound -= CanLoadCompilationFile;
+                CSharpLoader.OnCompilationContext -= RemovePatcherFromCompilation;
             }
         }
 
         void InsallModules()
         {
-            var sources = Path.Combine(CSharpLoader.GlobalRootDirectory, "modules-patched");
-            var generated = Path.Combine("csharp", "generated");
+            var sources = Path.Combine(CSharpLoader.GlobalRootDirectory, "plugins", "modules-patched");
+            var generated = Path.Combine(CSharpLoader.GlobalRootDirectory, "generated");
 
             foreach (var dir in Directory.GetDirectories(sources, "*", SearchOption.TopDirectoryOnly))
             {
@@ -522,11 +537,8 @@ namespace OTAPI.Patcher.Targets
 
         void CreateRuntimeEvents()
         {
-            Console.WriteLine("[OTAPI] Creating runtime events");
-
+            SetStatus("Creating runtime hooks...");
             PluginLoader.Clear();
-
-            StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = "Creating runtime hooks..." });
             using (var mm = new ModFwModder()
             {
                 InputPath = "outputs/OTAPI.exe",

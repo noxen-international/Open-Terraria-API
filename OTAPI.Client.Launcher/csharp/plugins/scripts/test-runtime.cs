@@ -16,22 +16,41 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
 
-namespace OTAPI.Common
+using System;
+using System.Linq;
+using Terraria;
+using ImGuiNET;
+
+bool active = true;
+int npcs = 0;
+
+var timer = new System.Timers.Timer();
+timer.AutoReset = true;
+timer.Interval = 2000;
+timer.Elapsed += (s, e) =>
 {
-    public interface IInstallDiscoverer
+    npcs = Main.npc.Where(n => n?.active == true).Count();
+};
+timer.Enabled = true;
+
+void OnGUI(On.Terraria.Main.orig_OnExtGUI orig)
+{
+    orig();
+
+    if (active)
     {
-        IEnumerable<string> FindInstalls();
-
-        OSPlatform GetClientPlatform();
-
-        string GetResource(string fileName, string installPath);
-        string GetResourcePath(string installPath);
-
-        bool IsValidInstallPath(string folder);
-
-        bool VerifyIntegrity(string path);
+        ImGui.Begin("CSharp Script", ref active);
+        ImGui.Text($"NPCs: {npcs}");
+        ImGui.End();
     }
 }
+
+On.Terraria.Main.OnExtGUI += OnGUI;
+
+Dispose = () =>
+{
+    On.Terraria.Main.OnExtGUI -= OnGUI;
+    timer?.Dispose();
+    timer = null;
+};

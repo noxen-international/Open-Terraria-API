@@ -20,9 +20,11 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 #pragma warning disable CS0436 // Type conflicts with imported type
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using ModFramework;
 using ModFramework.Plugins;
 
@@ -52,14 +54,43 @@ namespace Terraria
 
         static string CSV(params string[] args) => String.Join(",", args.Where(x => !String.IsNullOrWhiteSpace(x)));
 
+        private static void Configure()
+        {
+            // https://github.com/FNA-XNA/FNA/wiki/4:-FNA-and-Windows-API#64-bit-support
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
+                var path = Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    Environment.Is64BitProcess ? "x64" : "x86"
+                );
+                Directory.CreateDirectory(path);
+
+                try
+                {
+                    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+                    AddDllDirectory(path);
+                }
+                catch
+                {
+                    // Pre-Windows 7, KB2533623 
+                    SetDllDirectory(path);
+                }
+            }
+
+            // https://github.com/FNA-XNA/FNA/wiki/7:-FNA-Environment-Variables#fna_graphics_enable_highdpi
+            // NOTE: from documentation: 
+            //       Lastly, when packaging for macOS, be sure this is in your app bundle's Info.plist:
+            //           <key>NSHighResolutionCapable</key>
+            //           <string>True</string>
+            Environment.SetEnvironmentVariable("FNA_GRAPHICS_ENABLE_HIGHDPI", "1");
+        }
+
         /// <summary>
         /// Root entry point for OTAPI. Host games can use OTAPI.Runtime.dll to override the 
         /// </summary>
         public static void LaunchOTAPI()
         {
-            // we are now on net5 and terraria never knows to do this, so using the new frameworks we need to load
-            // assemblies from the EmbeddedResources of the Terraria exe upon request.
-            System.Runtime.Loader.AssemblyLoadContext.Default.Resolving += ResolveDependency;
+            Configure();
 
             Console.WriteLine($"[OTAPI] Starting up ({CSV(OTAPI.Common.Target, OTAPI.Common.Version, OTAPI.Common.GitHubCommit)}).");
 
@@ -75,28 +106,24 @@ namespace Terraria
             OnLaunched?.Invoke(null, EventArgs.Empty);
         }
 
-        public static Assembly ResolveDependency(System.Runtime.Loader.AssemblyLoadContext ctx, AssemblyName assemblyName)
+        public static void ShutdownOTAPI()
         {
-            Console.WriteLine($"Looking for assembly: {assemblyName.Name}");
-            var resourceName = assemblyName.Name + ".dll";
-            var src = typeof(Program).Assembly;
-            resourceName = Array.Find(src.GetManifestResourceNames(), element => element.EndsWith(resourceName));
-
-            if (!string.IsNullOrWhiteSpace(resourceName))
-            {
-                Console.WriteLine($"[OTAPI] Resolved ${resourceName}");
-                using (var stream = src.GetManifestResourceStream(resourceName))
-                    return System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromStream(stream);
-            }
-
-            if (File.Exists(resourceName))
-            {
-                var content = File.ReadAllBytes(resourceName);
-                return System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(content));
-            }
-
-            return null;
+            // give modfw mods the chance to safely shutdown. e.g. currently the csharp module can run scripts, and some of those scripts (currently) use native Cef.
+            Modifier.Apply(ModType.Shutdown, optionalParams: new[] { Assembly.GetExecutingAssembly() });
         }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool SetDefaultDllDirectories(int directoryFlags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern void AddDllDirectory(string lpPathName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool SetDllDirectory(string lpPathName);
+
+        const int LOAD_LIBRARY_SEARCH_DEFAULT_DIRS = 0x00001000;
 
 #if tModLoaderServer
         public static extern void orig_LaunchGame_();
@@ -104,6 +131,7 @@ namespace Terraria
         {
             LaunchOTAPI();
             orig_LaunchGame_();
+            ShutdownOTAPI();
         }
 #else // server + client
         public static extern void orig_LaunchGame(string[] args, bool monoArgs = false);
@@ -111,6 +139,7 @@ namespace Terraria
         {
             LaunchOTAPI();
             orig_LaunchGame(args, monoArgs);
+            ShutdownOTAPI();
         }
 #endif
     }

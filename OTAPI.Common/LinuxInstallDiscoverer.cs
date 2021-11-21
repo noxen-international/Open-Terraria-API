@@ -26,6 +26,7 @@ namespace OTAPI.Common
         public override string[] SearchPaths { get; } = new[]
         {
             "/home/[USER_NAME]/.steam/debian-installation/steamapps/common/Terraria",
+            "/home/[USER_NAME]/.steam/steam/steamapps/common/Terraria",
         };
 
         public override OSPlatform GetClientPlatform() => OSPlatform.Linux;
@@ -35,6 +36,9 @@ namespace OTAPI.Common
 
         public override bool IsValidInstallPath(string folder)
         {
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                return false;
+
             bool valid = Directory.Exists(folder);
 
             var startScript = Path.Combine(folder, "Terraria");

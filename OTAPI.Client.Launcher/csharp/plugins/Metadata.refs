@@ -7,3 +7,6 @@ OTAPI.Runtime.dll
 ImGui.NET.dll
 FNA.dll
 OTAPI.Client.Launcher.dll
+System.Drawing.Common.dll
+Xilium.CefGlue.dll
+Xilium.CefGlue.Common.dll

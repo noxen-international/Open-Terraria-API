@@ -16,22 +16,17 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
 
-namespace OTAPI.Common
+#pragma warning disable CS0108 // Member hides inherited member; missing new keyword
+#pragma warning disable CS0626 // Method, operator, or accessor is marked external and has no attributes on it
+
+/// <summary>
+/// @doc Adds extra client events for scripts to access easier
+/// </summary>
+namespace Terraria
 {
-    public interface IInstallDiscoverer
+    class patch_Main : Terraria.Main
     {
-        IEnumerable<string> FindInstalls();
-
-        OSPlatform GetClientPlatform();
-
-        string GetResource(string fileName, string installPath);
-        string GetResourcePath(string installPath);
-
-        bool IsValidInstallPath(string folder);
-
-        bool VerifyIntegrity(string path);
+        public static void OnExtGUI() { } // this could be an event, but a monomod hook is used instead. 
     }
 }

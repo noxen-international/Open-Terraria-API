@@ -50,26 +50,26 @@ public class HostGame : Terraria.Main
         _imGuiRenderer = new ImGuiRenderer(this);
         _imGuiRenderer.RebuildFontAtlas();
 
-        On.Terraria.Main.DrawCursor += (orig, bonus, smart) =>
-        {
-
-            _imGuiRenderer.BeforeLayout(_gameTime);
-            try
-            {
-                ImGuiDraw?.Invoke(this, EventArgs.Empty);
-                orig(bonus, smart);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(ex);
-            }
-            _imGuiRenderer.AfterLayout();
-        };
+        // On.Terraria.Main.DrawCursor += (orig, bonus, smart) =>
+        // {
+        //     _imGuiRenderer.BeforeLayout(_gameTime);
+        //     try
+        //     {
+        //         //ImGuiDraw?.Invoke(this, EventArgs.Empty);
+        //         OnExtGUI();
+        //         orig(bonus, smart);
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         Console.Error.WriteLine(ex);
+        //     }
+        //     _imGuiRenderer.AfterLayout();
+        // };
     }
 
     static Num.Vector3 clear_color = new Num.Vector3(114f / 255f, 144f / 255f, 154f / 255f);
 
-    public event EventHandler ImGuiDraw;
+    //public event EventHandler ImGuiDraw;
 
     GameTime _gameTime;
     public override void Draw(GameTime gameTime)
@@ -78,5 +78,16 @@ public class HostGame : Terraria.Main
         this.GraphicsDevice.Clear(new Color(clear_color.X, clear_color.Y, clear_color.Z));
 
         base.Draw(gameTime);
+
+        _imGuiRenderer.BeforeLayout(_gameTime);
+        try
+        {
+            OnExtGUI();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex);
+        }
+        _imGuiRenderer.AfterLayout();
     }
 }
