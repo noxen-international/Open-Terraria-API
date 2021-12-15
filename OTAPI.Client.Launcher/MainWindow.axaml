@@ -46,7 +46,7 @@
       <Setter Property="Margin" Value="0 2 0 0" />
     </Style>
     <Style Selector="TextBlock.installStatus">
-      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontSize" Value="12" />
       <Setter Property="Foreground" Value="ForestGreen" />
       <Setter Property="HorizontalAlignment" Value="Center" />
       <Setter Property="Margin" Value="20" />

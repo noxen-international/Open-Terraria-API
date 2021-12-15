@@ -35,11 +35,6 @@ namespace OTAPI.Patcher.Targets
     [MonoMod.MonoModIgnore]
     public class OTAPIClientLightweightTarget : IPatchTarget
     {
-        public class StatusUpdateArgs : EventArgs
-        {
-            public string Text { get; set; }
-        }
-
         public string DisplayText { get; } = "OTAPI Client (lightweight)";
         public string InstallDestination { get; } = Path.Combine(Environment.CurrentDirectory, "client");
         public string TemporaryFiles { get; } = Path.Combine(Environment.CurrentDirectory, "temp");
@@ -51,6 +46,10 @@ namespace OTAPI.Patcher.Targets
         public string? InstallPath { get; set; }
 
         public string BinFolder { get; set; } = Path.Combine(Environment.CurrentDirectory, "bin");
+
+        public AssemblyLoadContext AssemblyContext { get; set; } = AssemblyLoadContext.Default;
+
+        public bool VerboseLogs { get; set; }
 
         bool CanLoadPatchFile(string filepath)
         {
@@ -92,7 +91,7 @@ namespace OTAPI.Patcher.Targets
                 {
                     var abs = Path.GetFullPath(file);
                     var content = File.ReadAllBytes(abs);
-                    assembly = AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(content));
+                    assembly = AssemblyContext.LoadFromStream(new MemoryStream(content));
                 }
                 catch (Exception ex)
                 {
@@ -135,15 +134,28 @@ namespace OTAPI.Patcher.Targets
             return path;
         }
 
+        class Tester : ModFramework.Plugins.DefaultAssemblyLoader
+        {
+            private AssemblyLoadContext AssemblyLoadContext;
+            public Tester(AssemblyLoadContext assemblyLoadContext)
+            {
+                AssemblyLoadContext = assemblyLoadContext;
+            }
+
+            public override Assembly Load(MemoryStream assembly, MemoryStream? symbols = null)
+                => AssemblyLoadContext.LoadFromStream(assembly, symbols);
+        }
+
         public void Patch()
         {
             Console.WriteLine($"Open Terraria API v{Common.GetVersion()} [lightweight]");
-            Console.WriteLine($"AppContext.BaseDirectory: {AppContext.BaseDirectory}");
 
-            SetStatus("Starting...");
+            SetStatus("Starting client patch process...");
 
+            PluginLoader.AssemblyLoader = new Tester(AssemblyContext);
             PluginLoader.AssemblyFound += CanLoadPatchFile;
             CSharpLoader.AssemblyFound += CanLoadPatchFile;
+            CSharpLoader.AssemblyContextDefault = AssemblyContext;
             ModFramework.Modules.ClearScript.ScriptManager.FileFound += CanLoadPatchFile;
             ModFramework.Modules.Lua.ScriptManager.FileFound += CanLoadPatchFile;
 
@@ -186,10 +198,11 @@ namespace OTAPI.Patcher.Targets
                 //var freshAssembly = "../../../../OTAPI.Setup/bin/Debug/net6.0/Terraria.exe";
                 var localPath_x86 = Path.Combine(TemporaryFiles, "Terraria.x86.exe");
                 var localPath_x64 = Path.Combine(TemporaryFiles, "Terraria.x64.exe");
+                var installed_otapi = Path.Combine(InstallDestination, "OTAPI.exe");
 
                 if (File.Exists(localPath_x86)) File.Delete(localPath_x86);
                 if (File.Exists(localPath_x64)) File.Delete(localPath_x64);
-                if (File.Exists("OTAPI.exe")) File.Delete("OTAPI.exe");
+                if (File.Exists(installed_otapi)) File.Delete(installed_otapi);
 
                 File.Copy(input, localPath_x86);
 
@@ -230,23 +243,23 @@ namespace OTAPI.Patcher.Targets
                 {
                     {asmFNA.FullName, asmFNA },
                 };
-                Assembly PatchResolve(object sender, ResolveEventArgs args)
+                Assembly PatchResolve(AssemblyLoadContext ctx, AssemblyName assemblyName)
                 {
-                    Console.WriteLine("[Patch Resolve] " + args.Name);
+                    Console.WriteLine("[Patch Resolve] " + assemblyName.Name);
 
-                    var match = assemblies.FirstOrDefault(a => a.Key == args.Name);
+                    var match = assemblies.FirstOrDefault(a => a.Key == assemblyName.Name);
                     if (match.Key != null)
                         return match.Value;
 
-                    var asn = new AssemblyName(args.Name);
-                    var filename = $"{asn.Name}.dll";
+                    //var asn = new AssemblyName(args.Name);
+                    var filename = $"{assemblyName.Name}.dll";
                     if (TryLoad(filename, out Assembly assembly))
                     {
                         assemblies.Add(assembly.FullName, assembly);
                         return assembly;
                     }
 
-                    filename = Path.Combine(embeddedResourcesDir, $"{asn.Name}.dll");
+                    filename = Path.Combine(embeddedResourcesDir, $"{assemblyName.Name}.dll");
                     if (TryLoad(filename, out Assembly resassembly))
                     {
                         assemblies.Add(resassembly.FullName, resassembly);
@@ -255,7 +268,7 @@ namespace OTAPI.Patcher.Targets
 
                     foreach (var dir in XnaPaths)
                     {
-                        var xnaDll = Path.Combine(dir, $"{asn.Name}.dll");
+                        var xnaDll = Path.Combine(dir, $"{assemblyName.Name}.dll");
                         if (File.Exists(xnaDll))
                         {
                             return asmFNA;
@@ -263,7 +276,8 @@ namespace OTAPI.Patcher.Targets
                     }
                     return null;
                 }
-                AppDomain.CurrentDomain.AssemblyResolve += PatchResolve;
+                //AppDomain.CurrentDomain.AssemblyResolve += PatchResolve;
+                AssemblyContext.Resolving += PatchResolve;
 
                 var primaryAssemblyPath = Path.Combine(Environment.CurrentDirectory, localPath_x86);
 
@@ -340,7 +354,7 @@ namespace OTAPI.Patcher.Targets
                     InputPath = primaryAssemblyPath,
                     OutputPath = "OTAPI.dll",
                     MissingDependencyThrow = false,
-                    //LogVerboseEnabled = true,
+                    LogVerboseEnabled = VerboseLogs,
                     PublicEverything = true,
 
                     GACPaths = new string[] { }, // avoid MonoMod looking up the GAC, which causes an exception on .netcore
@@ -420,7 +434,7 @@ namespace OTAPI.Patcher.Targets
                     InputPath = "OTAPI.dll",
                     OutputPath = temp_out,
                     MissingDependencyThrow = false,
-                    //LogVerboseEnabled = true,
+                    LogVerboseEnabled = VerboseLogs,
                     //PublicEverything = true,
 
                     GACPaths = new string[] { }, // avoid MonoMod looking up the GAC, which causes an exception on .netcore
@@ -489,7 +503,8 @@ namespace OTAPI.Patcher.Targets
                     markdownDocumentor.Write(doco_md);
                     markdownDocumentor.Dispose();
 
-                    AppDomain.CurrentDomain.AssemblyResolve -= PatchResolve;
+                    AssemblyContext.Resolving -= PatchResolve;
+                    //AppDomain.CurrentDomain.AssemblyResolve -= PatchResolve;
 
                     mm.Log("[OTAPI] Patching completed.");
                 }
@@ -508,7 +523,7 @@ namespace OTAPI.Patcher.Targets
             }
 
             CompileModules();
-            InsallModules();
+            InstallModules();
         }
 
         void CompileModules()
@@ -541,7 +556,7 @@ namespace OTAPI.Patcher.Targets
             }
         }
 
-        void InsallModules()
+        void InstallModules()
         {
             var sources = Path.Combine(CSharpLoader.GlobalRootDirectory, "plugins", "modules-patched");
             var generated = Path.Combine(CSharpLoader.GlobalRootDirectory, "generated");
@@ -585,7 +600,7 @@ namespace OTAPI.Patcher.Targets
                 InputPath = "outputs/OTAPI.exe",
                 //OutputPath = "OTAPI.dll",
                 MissingDependencyThrow = false,
-                //LogVerboseEnabled = true,
+                LogVerboseEnabled = VerboseLogs,
                 //PublicEverything = true,
 
                 GACPaths = new string[] { } // avoid MonoMod looking up the GAC, which causes an exception on .netcore

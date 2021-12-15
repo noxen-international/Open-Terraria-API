@@ -63,7 +63,9 @@ namespace OTAPI.Client.Launcher
 
             DataContext = Context;
 
-            _watcher = new FileSystemWatcher(Environment.CurrentDirectory, "OTAPI.exe");
+            var clientPath = Path.Combine(Environment.CurrentDirectory, "client");
+            Directory.CreateDirectory(clientPath);
+            _watcher = new FileSystemWatcher(clientPath, "OTAPI.exe");
             _watcher.Created += OTAPI_Changed;
             _watcher.Changed += OTAPI_Changed;
             _watcher.Deleted += OTAPI_Changed;
@@ -219,15 +221,37 @@ namespace OTAPI.Client.Launcher
                 //ModFramework.Modules.CSharp.CSharpLoader.OnCompilationContext += CompileCtx;
                 try
                 {
-                    var target = new OTAPIClientLightweightTarget();
-                    target.InstallPath = Context.InstallPath.Path;
+                    void Client()
+                    {
+                        //new Patchers.ClientPatcher().Patch(Context.InstallPath.Path, (sender, e) => Context.InstallStatus = e.Text);
+                        var target = new OTAPIClientLightweightTarget();
+                        target.AssemblyContext = new Patchers.TestResolver();
+                        target.InstallPath = Context.InstallPath.Path;
 
-                    target.StatusUpdate += (sender, e) => Context.InstallStatus = e.Text;
-                    target.Patch();
-                    Context.InstallStatus = "Patching completed, installing to existing installation...";
+                        target.StatusUpdate += (sender, e) => Context.InstallStatus = e.Text;
+                        target.Patch();
+                        Context.InstallStatus = "Patching completed, installing to existing installation...";
 
-                    Context.InstallPath.Target.StatusUpdate += (sender, e) => Context.InstallStatus = e.Text;
-                    Context.InstallPath.Target.Install(Context.InstallPath.Path);
+                        //Context.InstallPath.Target.StatusUpdate += (sender, e) => Context.InstallStatus = e.Text;
+                        //Context.InstallPath.Target.Install(Context.InstallPath.Path);
+                    }
+
+                    void Server()
+                    {
+                        var target = new OTAPIPCServerTarget();
+                        target.InstallDestination = Path.Combine(Context.InstallPath.Path, "server");
+                        target.WriteArtifacts = false;
+                        target.OfficialBinaryVersion = OTAPIPCServerTarget.BinaryVersion.Support;
+
+                        target.StatusUpdate += (sender, e) => Context.InstallStatus = e.Text;
+                        target.Patch();
+                    }
+
+                    Client();
+
+                    Context.InstallStatus = "Installing server";
+
+                    Server();
 
                     Context.InstallStatus = "Install completed";
 

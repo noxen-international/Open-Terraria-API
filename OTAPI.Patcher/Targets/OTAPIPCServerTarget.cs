@@ -22,6 +22,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Text;
 using ModFramework;
 using ModFramework.Modules.CSharp;
@@ -37,7 +38,7 @@ namespace OTAPI.Patcher.Targets
         public const String TerrariaWebsite = "https://terraria.org";
 
         public virtual string DisplayText { get; } = "OTAPI PC Server";
-        public string InstallDestination { get; } = Environment.CurrentDirectory;
+        public virtual string InstallDestination { get; set; } = Environment.CurrentDirectory;
 
         public virtual string CliKey { get; } = "latest";
 
@@ -47,8 +48,30 @@ namespace OTAPI.Patcher.Targets
 
         public virtual string SupportedDownloadUrl { get; } = $"{TerrariaWebsite}/api/download/pc-dedicated-server/terraria-server-1432.zip";
         public virtual string ArtifactName { get; } = "artifact-pc";
+        
+        public virtual string BinFolder { get; set; } = Path.Combine(Environment.CurrentDirectory, "bin");
+
+        public virtual bool WriteArtifacts { get; set; } = true;
+
+        public AssemblyLoadContext AssemblyContext { get; set; } = AssemblyLoadContext.Default;
+
+        public event EventHandler<StatusUpdateArgs> StatusUpdate;
+
+        public enum BinaryVersion
+        {
+            Support,
+            Latest,
+        }
+
+        public virtual BinaryVersion? OfficialBinaryVersion { get; set; }
 
         private MarkdownDocumentor markdownDocumentor = new ModificationMdDocumentor();
+
+        void SetStatus(string status)
+        {
+            StatusUpdate?.Invoke(this, new StatusUpdateArgs() { Text = status });
+            Console.WriteLine(status);
+        }
 
         protected virtual bool CanLoadFile(string filepath)
         {
@@ -61,6 +84,10 @@ namespace OTAPI.Patcher.Targets
         public virtual void Patch()
         {
             Console.WriteLine($"Open Terraria API v{Common.GetVersion()}");
+
+            SetStatus("Starting server patch process...");
+
+            Directory.CreateDirectory(InstallDestination);
 
             PluginLoader.AssemblyFound += CanLoadFile;
             ModFramework.Modules.CSharp.CSharpLoader.AssemblyFound += CanLoadFile;
@@ -80,11 +107,13 @@ namespace OTAPI.Patcher.Targets
             PreShimForCompilation();
             ApplyModifications();
 
-            if (File.Exists(MdFileName)) File.Delete(MdFileName);
-            markdownDocumentor.Write(MdFileName);
+            SetStatus("Writing MD...");
+            var mdfilepath = Path.Combine(InstallDestination, MdFileName);
+            if (File.Exists(mdfilepath)) File.Delete(mdfilepath);
+            markdownDocumentor.Write(mdfilepath);
             markdownDocumentor.Dispose();
 
-            this.WriteCIArtifacts(ArtifactName);
+            if(WriteArtifacts) this.WriteCIArtifacts(ArtifactName);
         }
 
         #region Produce OTAPI
@@ -93,7 +122,7 @@ namespace OTAPI.Patcher.Targets
             var localPath = "./TerrariaServer.dll";
 
             // load into the current app domain for patch refs
-            var asm = Assembly.LoadFile(Path.Combine(Environment.CurrentDirectory, localPath));
+            var asm = AssemblyContext.LoadFromAssemblyPath(Path.Combine(Environment.CurrentDirectory, localPath));
             AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
             {
                 if (args.Name.IndexOf("TerrariaServer") > -1)
@@ -104,6 +133,7 @@ namespace OTAPI.Patcher.Targets
             };
 
             Console.WriteLine("[OTAPI] Extracting embedded binaries for assembly resolution...");
+            SetStatus("Extracting official binary resources");
             var extractor = new ResourceExtractor();
             var embeddedResourcesDir = extractor.Extract(localPath);
 
@@ -119,6 +149,7 @@ namespace OTAPI.Patcher.Targets
             //var assembly_output = "OTAPI.dll";
             //var runtime_output = "OTAPI.Runtime.dll";
 
+            SetStatus("Patching binaries");
             using var mm = new ModFwModder()
             {
                 InputPath = localPath,
@@ -136,7 +167,7 @@ namespace OTAPI.Patcher.Targets
 
             mm.MapDependencies();
 
-            mm.ReadMod(this.GetType().Assembly.Location);
+            mm.ReadMod(ResolveFile("OTAPI.Patcher.dll"));
 
             this.AddPatchMetadata(mm);
             this.AddEnvMetadata(mm);
@@ -153,6 +184,8 @@ namespace OTAPI.Patcher.Targets
             mm.Write();
 
             mm.Log("[OTAPI] Generating OTAPI.Runtime.dll");
+
+            SetStatus("Creating runtime hooks...");
             var gen = new MonoMod.RuntimeDetour.HookGen.HookGenerator(mm, "OTAPI.Runtime.dll");
             using (ModuleDefinition mOut = gen.OutputModule)
             {
@@ -172,6 +205,7 @@ namespace OTAPI.Patcher.Targets
 
         void BuildNuGetPackage()
         {
+            SetStatus("Building NuGet package");
             var nuspec_xml = File.ReadAllText(NuSpecFilePath);
             nuspec_xml = nuspec_xml.Replace("[INJECT_VERSION]", Common.GetVersion());
 
@@ -199,22 +233,43 @@ namespace OTAPI.Patcher.Targets
         }
         #endregion
 
+        string ResolveFile(string path)
+        {
+            var info = new FileInfo(path);
+            path = info.FullName;
+
+            if (!File.Exists(path))
+                path = Path.Combine(Environment.CurrentDirectory, info.Name);
+
+            if (!File.Exists(path))
+                path = Path.Combine(BinFolder, info.Name);
+
+            if (!File.Exists(path))
+                path = Path.Combine(AppContext.BaseDirectory, info.Name);
+
+            return path;
+        }
+
         #region Produce TerrariaServer.dll (shimmed, vanilla)
 
         public virtual void PreShimForCompilation()
         {
+            SetStatus("Downloading official binaries");
             var input = DownloadServer();
 
             Console.WriteLine("[OTAPI] Extracting embedded binaries and packing into one binary...");
+
+            SetStatus("Processing official binaries");
 
             // allow for refs to the embedded resources, such as ReLogic.dll
             var extractor = new ResourceExtractor();
             var embeddedResourcesDir = extractor.Extract(input);
             var inputName = Path.GetFileNameWithoutExtension(input);
 
-            Directory.CreateDirectory("outputs");
+            var outputsDir = Path.Combine(InstallDestination, "outputs");
+            Directory.CreateDirectory(outputsDir);
 
-            var output = Path.Combine("outputs", "TerrariaServer.dll");
+            var output = Path.Combine(outputsDir, "TerrariaServer.dll");
 
             using ModFwModder mm = new ModFwModder()
             {
@@ -234,7 +289,7 @@ namespace OTAPI.Patcher.Targets
             mm.Read();
 
             // for HookResult + HookEvent
-            mm.ReadMod(this.GetType().Assembly.Location);
+            mm.ReadMod(ResolveFile("OTAPI.Patcher.dll"));
 
             var initialModuleName = mm.Module.Name;
 
@@ -244,6 +299,7 @@ namespace OTAPI.Patcher.Targets
             mm.Module.Name = "TerrariaServer.dll";
             mm.Module.Assembly.Name.Name = "TerrariaServer";
 
+            SetStatus("Building shims");
             // build shims
             PluginLoader.Init();
             var ldr = new CSharpLoader()
@@ -392,6 +448,11 @@ namespace OTAPI.Patcher.Targets
 
         public virtual string GetZipUrl()
         {
+            if (OfficialBinaryVersion == BinaryVersion.Support)
+                return SupportedDownloadUrl;
+            if (OfficialBinaryVersion == BinaryVersion.Latest)
+                return AquireLatestBinaryUrl();
+
             var cli = this.GetCliValue(CliKey);
 
             if (cli != "n")
