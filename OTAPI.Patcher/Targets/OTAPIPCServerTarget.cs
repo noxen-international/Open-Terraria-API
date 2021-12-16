@@ -241,10 +241,10 @@ namespace OTAPI.Patcher.Targets
             if (!File.Exists(path))
                 path = Path.Combine(Environment.CurrentDirectory, info.Name);
 
-            if (!File.Exists(path))
+            else if (!File.Exists(path))
                 path = Path.Combine(BinFolder, info.Name);
 
-            if (!File.Exists(path))
+            else if (!File.Exists(path))
                 path = Path.Combine(AppContext.BaseDirectory, info.Name);
 
             return path;

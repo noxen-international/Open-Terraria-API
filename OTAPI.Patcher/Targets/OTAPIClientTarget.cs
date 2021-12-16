@@ -125,19 +125,19 @@ namespace OTAPI.Patcher.Targets
             if (!File.Exists(path))
                 path = Path.Combine(Environment.CurrentDirectory, info.Name);
 
-            if (!File.Exists(path))
+            else if (!File.Exists(path))
                 path = Path.Combine(BinFolder, info.Name);
 
-            if (!File.Exists(path))
+            else if (!File.Exists(path))
                 path = Path.Combine(AppContext.BaseDirectory, info.Name);
 
             return path;
         }
 
-        class Tester : ModFramework.Plugins.DefaultAssemblyLoader
+        class ContextAssemblyLoader : ModFramework.Plugins.DefaultAssemblyLoader
         {
             private AssemblyLoadContext AssemblyLoadContext;
-            public Tester(AssemblyLoadContext assemblyLoadContext)
+            public ContextAssemblyLoader(AssemblyLoadContext assemblyLoadContext)
             {
                 AssemblyLoadContext = assemblyLoadContext;
             }
@@ -152,7 +152,7 @@ namespace OTAPI.Patcher.Targets
 
             SetStatus("Starting client patch process...");
 
-            PluginLoader.AssemblyLoader = new Tester(AssemblyContext);
+            PluginLoader.AssemblyLoader = new ContextAssemblyLoader(AssemblyContext);
             PluginLoader.AssemblyFound += CanLoadPatchFile;
             CSharpLoader.AssemblyFound += CanLoadPatchFile;
             CSharpLoader.AssemblyContextDefault = AssemblyContext;
@@ -243,6 +243,12 @@ namespace OTAPI.Patcher.Targets
                 {
                     {asmFNA.FullName, asmFNA },
                 };
+                //var searchPaths = new List<string>()
+                //{
+                //    Environment.CurrentDirectory,
+                //    embeddedResourcesDir,
+                //    "client"
+                //};
                 Assembly PatchResolve(AssemblyLoadContext ctx, AssemblyName assemblyName)
                 {
                     Console.WriteLine("[Patch Resolve] " + assemblyName.Name);
@@ -251,20 +257,15 @@ namespace OTAPI.Patcher.Targets
                     if (match.Key != null)
                         return match.Value;
 
-                    //var asn = new AssemblyName(args.Name);
-                    var filename = $"{assemblyName.Name}.dll";
-                    if (TryLoad(filename, out Assembly assembly))
-                    {
-                        assemblies.Add(assembly.FullName, assembly);
-                        return assembly;
-                    }
-
-                    filename = Path.Combine(embeddedResourcesDir, $"{assemblyName.Name}.dll");
-                    if (TryLoad(filename, out Assembly resassembly))
-                    {
-                        assemblies.Add(resassembly.FullName, resassembly);
-                        return resassembly;
-                    }
+                    //foreach (var dir in searchPaths)
+                    //{
+                    //    var filename = $"{assemblyName.Name}.dll";
+                    //    if (TryLoad(filename, out Assembly assembly))
+                    //    {
+                    //        assemblies.Add(assembly.FullName, assembly);
+                    //        return assembly;
+                    //    }
+                    //}
 
                     foreach (var dir in XnaPaths)
                     {

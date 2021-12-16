@@ -96,10 +96,10 @@ namespace OTAPI.Client.Launcher.Actions
             if (!File.Exists(path))
                 path = Path.Combine(Environment.CurrentDirectory, "bin", filename);
 
-            if (!File.Exists(path))
+            else if (!File.Exists(path))
                 path = Path.Combine(AppContext.BaseDirectory, filename);
 
-            if (!File.Exists(path))
+            else if (!File.Exists(path))
                 path = Path.Combine(Environment.CurrentDirectory, "client", filename);
 
             return path;
@@ -175,16 +175,19 @@ namespace OTAPI.Client.Launcher.Actions
             if (_nativeCache.TryGetValue(libraryName, out IntPtr cached))
                 return cached;
 
-            Console.WriteLine("Looking for " + libraryName);
+            //Console.WriteLine("Looking for " + libraryName);
 
             IEnumerable<string> matches = Enumerable.Empty<string>();
 
             foreach (var basePath in new[] {
                 Environment.CurrentDirectory,
                 AppContext.BaseDirectory,
-                Path.Combine(Environment.CurrentDirectory, "client")
+                Path.Combine(Environment.CurrentDirectory, "client"),
+                Path.Combine(Environment.CurrentDirectory, "bin"),
             })
             {
+                if(!Directory.Exists(basePath)) continue;
+
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 {
                     var osx = Path.Combine(basePath, "osx");
